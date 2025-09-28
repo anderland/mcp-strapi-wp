@@ -1,4 +1,3 @@
-// src/app/lib/to-blocks.js
 export function toBlocks(plain) {
   const text = String(plain ?? '').trim();
   if (!text)

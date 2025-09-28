@@ -1,7 +1,13 @@
 {
   "name": "mcp-app",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
+  "license": "MIT",
+  "author": "anderland",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anderland/mcp-strapi-wp"
+  },
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
@@ -28,5 +34,6 @@
     "eslint": "^9",
     "eslint-config-next": "15.5.4",
     "tailwindcss": "^4"
-  }
+  },
+  "packageManager": "yarn@4.10.1+sha512.45bcc0f26c64f59bbfff2a721fbc8226f7a0fe5da70c116cecb09bdfed2514a4d5a22484b75103070175cee5d7d4ad3719cd4be029c94ae5848b44346aefe2a8"
 }

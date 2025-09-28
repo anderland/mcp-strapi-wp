@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -17,13 +16,6 @@ function makeAuthHeader() {
   if (!user || !appPassword) return null;
   const token = Buffer.from(`${user}:${appPassword}`).toString('base64');
   return `Basic ${token}`;
-}
-
-function escapeHtml(s = '') {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
 }
 
 class WordPressMCPServer {
@@ -105,14 +97,9 @@ class WordPressMCPServer {
   async saveDraft({ title, content }) {
     if (!this.wpUrl || !this.authHeader)
       throw new Error('WORDPRESS_URL/USER/APP_PASSWORD not set');
-
     const res = await axios.post(
       `${this.wpUrl}/wp-json/wp/v2/posts`,
-      {
-        title,
-        content,
-        status: 'draft',
-      },
+      { title, content, status: 'draft' },
       {
         headers: {
           Authorization: this.authHeader,
@@ -121,7 +108,6 @@ class WordPressMCPServer {
         httpsAgent: this.httpsAgent,
       }
     );
-
     return {
       content: [
         {

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getClients } from '@/mcp-clients.js';
+import { getClients } from '@/mcp/clients.js';
 import { toBlocks } from '@/app/lib/to-blocks.js';
 
 export const runtime = 'nodejs';

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { rulesetPipeline } from '../../lib/ruleset-pipeline.js';
+import { runWithVerification } from '@/app/lib/run-with-verification.js';
+import { getClients } from '@/mcp/clients.js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -7,17 +8,24 @@ export const dynamic = 'force-dynamic';
 export async function POST(req) {
   try {
     const body = await req.json();
-    const { text, stage = 0, options = {} } = body || {};
+    const { text, stage = 0, options = {}, factCheckQuery } = body || {};
     if (!text || String(text).trim().length < 10) {
       return NextResponse.json(
-        { error: 'The souece text must be at least 10 characters' },
+        { error: 'Text must be at least 10 characters' },
         { status: 400 }
       );
     }
     const clamp = !!options.clamp1500;
     const clipped = clamp ? String(text).slice(0, 1500) : String(text);
 
-    const res = await rulesetPipeline.invoke({ text: clipped, stage });
+    // Connect or reuse MCP clients (includes factcheck if configured)
+    const { factcheck } = await getClients();
+
+    const res = await runWithVerification(factcheck, {
+      text: clipped,
+      stage,
+      factCheckQuery,
+    });
     const llmRewrite = res?.rewrite?.text || clipped;
     const corrected = llmRewrite;
 

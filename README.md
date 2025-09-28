@@ -72,7 +72,7 @@ npm run dev
 - Optionally save to Strapi or WordPress via the selector and Save
 - Load Drafts to verify the saved items for each
 
-## Ruleset pipeline (stages 0–6)
+## Ruleset pipeline (stages 0–7)
 
 The pipeline in src/app/lib/ruleset-pipeline.js is a LangChain ChatOpenAI sequence that:
 
@@ -84,23 +84,27 @@ Stages progressively add constraints:
 
 - 0: Baseline claims handling
 - 1: Topic relevance gate
-- 2: Exclude extraordinary un-attributed claims
-- 3: Internal coherence filter
+- 2: Extraordinary claims require in-TEXT corroboration (exclude if absent)
+- 3: Internal coherence filter (includes temporal logic checks)
 - 4: Harm/panic minimization
 - 5: Quote/nickname discipline
-- 6: Assemble using only safe phrases
+- 6: External check (Independent 'sus' agent; advisory only, world knowledge allowed, no invention)
+- 7: Selection-only assembly & sus gate (strip sentences with ≥ medium sus-flagged terms unless Stage‑2 corroboration exists)
+
+Note: Stage 6 only logs sus flags (visible under `result._workshop.sus`); Stage 7 enforces gating based on those flags. When multiple red flags are detected (fictional entities, temporal inconsistencies, extraordinary claims), the system adds a `human_review_recommended` flag to alert editors.
 
 Environment controls:
 
 - OPENAI_MODEL, OPENAI_TEMPERATURE
-- RULESET_STAGE (server default) and RULESET_PATH (custom ruleset)
+- RULESET_STAGE (server default, 0–7) and RULESET_PATH (custom ruleset)
 
 ## API reference (from the Next.js app)
 
 - POST /api/run
 
-  - Body: `{ text: string, stage?: number, options?: { clamp1500?: boolean } }`
+- Body: `{ text: string, stage?: number, options?: { clamp1500?: boolean } }`
   - Returns: `{ success, result: { corrected_text, report, agent, full } }`
+  - The `full` object may include `human_review_recommended` when suspicious content is detected
 
 - POST /api/save-draft
 

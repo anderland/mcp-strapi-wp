@@ -3,6 +3,7 @@ import { useState } from 'react';
 import Select from '@/components/Select';
 import CodeBlock from '@/components/CodeBlock';
 import godzilla from '../../data/godzilla.json';
+import { ExclamationTriangleIcon } from '@heroicons/react/16/solid';
 
 export default function Home() {
   const [text, setText] = useState('');
@@ -20,6 +21,7 @@ export default function Home() {
   const [corrected, setCorrected] = useState('');
   const [report, setReport] = useState(null);
   const [stage, setStage] = useState(0);
+  const [humanReview, setHumanReview] = useState(null);
 
   const run = async () => {
     setLoading((l) => ({ ...l, run: true }));
@@ -34,6 +36,7 @@ export default function Home() {
       setResult(JSON.stringify(data, null, 2));
       setCorrected(data?.result?.corrected_text || '');
       setReport(data?.result?.report || null);
+      setHumanReview(data?.result?.full?.human_review_recommended || null);
     } finally {
       setLoading((l) => ({ ...l, run: false }));
     }
@@ -106,7 +109,7 @@ export default function Home() {
                 </p>
               </div>
               <div className='text-right'>
-                <p className='text-[11px] font-mono'>Version 0.2</p>
+                <p className='text-[11px] font-mono'>Version 0.3</p>
               </div>
             </div>
             <div className='mt-10'>
@@ -158,7 +161,7 @@ export default function Home() {
                     value={String(stage)}
                     onChange={(v) => setStage(Number(v))}
                   >
-                    {[0, 1, 2, 3, 4, 5, 6].map((n) => (
+                    {[0, 1, 2, 3, 4, 5, 6, 7].map((n) => (
                       <option key={n} value={String(n)}>{`Stage ${n}`}</option>
                     ))}
                   </Select>
@@ -167,12 +170,46 @@ export default function Home() {
             </div>
 
             <div className='mt-10'>
-              <label
-                htmlFor='output-text'
-                className='block text-sm font-medium font-display text-gray-900 dark:text-white'
-              >
-                Output Text
-              </label>
+              <div className='flex items-center justify-between'>
+                <label
+                  htmlFor='output-text'
+                  className='block text-sm font-medium font-display text-gray-900 dark:text-white'
+                >
+                  Output Text
+                </label>
+                {humanReview?.flag && stage >= 6 && (
+                  <div className='flex items-center mb-0.5'>
+                    <span
+                      className={`inline-flex items-center gap-x-1.5 rounded-md px-2 py-1 text-xs font-normal text-gray-900 inset-ring inset-ring-gray-200 dark:text-white dark:inset-ring-white/10 ${
+                        humanReview.severity === 'critical' ? ' ' : ' '
+                      }`}
+                      title={humanReview.recommendation}
+                    >
+                      <svg
+                        viewBox='0 0 6 6'
+                        aria-hidden='true'
+                        className={`size-1.5  ${
+                          humanReview.severity === 'critical'
+                            ? 'fill-red-500 dark:fill-red-400'
+                            : 'fill-yellow-500 dark:fill-yellow-400'
+                        }`}
+                      >
+                        <circle r={3} cx={3} cy={3} />
+                      </svg>
+                      Human review{' '}
+                      {humanReview.severity === 'critical'
+                        ? 'required'
+                        : 'recommended'}
+                    </span>
+                    {/* {humanReview.details?.length > 0 && (
+                      <span className='text-xs text-gray-500 dark:text-gray-400'>
+                        {humanReview.details[0]}
+                      </span>
+                    )} */}
+                  </div>
+                )}
+              </div>
+
               <textarea
                 rows={6}
                 value={corrected}

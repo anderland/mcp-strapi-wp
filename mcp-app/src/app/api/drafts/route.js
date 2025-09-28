@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getClients } from '@/mcp-clients.js';
+import { getClients } from '@/mcp/clients.js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
