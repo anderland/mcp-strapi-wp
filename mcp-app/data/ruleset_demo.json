@@ -1,0 +1,334 @@
+[
+  {
+    "id": "ap_titles_courtesy",
+    "title": "Courtesy titles",
+    "level": "flag",
+    "severity": "medium",
+    "description": "Avoid Mr., Ms., Mrs. in most contexts per AP.",
+    "cues": ["Mr.", "Ms.", "Mrs."],
+    "guards": ["quoted speech", "formal list of donors"]
+  },
+  {
+    "id": "ap_time_format",
+    "title": "Time format",
+    "level": "flag",
+    "severity": "medium",
+    "description": "Use a.m./p.m. with periods; omit :00 (7 p.m., not 7:00 PM).",
+    "cues": [":00 PM", ":00 AM", "10pm", "10am", "PM", "AM"],
+    "guards": ["ISO timestamps", "schedules with seconds"]
+  },
+  {
+    "id": "ap_numbers_basic",
+    "title": "Numbers 1-9 spelled out",
+    "level": "flag",
+    "severity": "low",
+    "description": "Spell out one through nine; use figures for 10 and above.",
+    "cues": [" 1 ", " 2 ", " 3 ", " 4 ", " 5 ", " 6 ", " 7 ", " 8 ", " 9 "],
+    "guards": ["measurements", "ages", "votes", "scores", "percentages"]
+  },
+  {
+    "id": "ap_percent_sign",
+    "title": "Percent sign",
+    "level": "flag",
+    "severity": "low",
+    "description": "Use % with a figure (e.g., 5%).",
+    "cues": [" percent", "percentage"],
+    "guards": ["quoted speech"]
+  },
+  {
+    "id": "ap_serial_comma",
+    "title": "Serial comma (Oxford)",
+    "level": "flag",
+    "severity": "low",
+    "description": "Generally avoid the Oxford comma unless needed for clarity.",
+    "cues": [", and", ", or"],
+    "guards": ["complex series needing clarity"]
+  },
+  {
+    "id": "ap_dates_ordinal_suffix",
+    "title": "Dates: no ordinal suffix",
+    "level": "flag",
+    "severity": "medium",
+    "description": "Write Sept. 5, not September 5th.",
+    "cues": [
+      " 1st",
+      " 2nd",
+      " 3rd",
+      " 4th",
+      " 5th",
+      " 6th",
+      " 7th",
+      " 8th",
+      " 9th",
+      " 10th",
+      " 11th",
+      " 12th",
+      " 13th",
+      " 14th",
+      " 15th",
+      " 16th",
+      " 17th",
+      " 18th",
+      " 19th",
+      " 20th",
+      " 21st",
+      " 22nd",
+      " 23rd",
+      " 24th",
+      " 25th",
+      " 26th",
+      " 27th",
+      " 28th",
+      " 29th",
+      " 30th",
+      " 31st"
+    ],
+    "guards": ["century references"]
+  },
+  {
+    "id": "ap_month_abbrev_rules",
+    "title": "Months: correct abbreviations",
+    "level": "flag",
+    "severity": "low",
+    "description": "Abbreviate Jan., Feb., Aug., Sept., Oct., Nov., Dec. with a date; do not abbreviate March, April, May, June, July.",
+    "cues": ["Mar.", "Apr.", "Jun.", "Jul.", "Sept 5", "Sep.", "September 05"],
+    "guards": ["AP datelines"]
+  },
+  {
+    "id": "ap_state_names_in_body",
+    "title": "States in body text",
+    "level": "flag",
+    "severity": "medium",
+    "description": "Spell out state names in body text; avoid postal codes.",
+    "cues": [
+      " CA,",
+      " NY,",
+      " MD,",
+      " TX,",
+      " FL,",
+      " AZ,",
+      " PA,",
+      " IL,",
+      " OH,",
+      " GA,"
+    ],
+    "guards": ["street addresses"]
+  },
+  {
+    "id": "ap_jr_sr_comma",
+    "title": "No comma before Jr./Sr.",
+    "level": "flag",
+    "severity": "low",
+    "description": "Do not use a comma before Jr. or Sr.",
+    "cues": [", Jr.", ", Sr."],
+    "guards": []
+  },
+  {
+    "id": "ap_us_abbrev",
+    "title": "U.S. abbreviation",
+    "level": "flag",
+    "severity": "medium",
+    "description": "Use U.S. (with periods) as a noun or adjective.",
+    "cues": [" US ", " US,", " US.", "US "],
+    "guards": ["URL", "code block"]
+  },
+  {
+    "id": "ap_ok_spelling",
+    "title": "OK vs. Okay",
+    "level": "flag",
+    "severity": "low",
+    "description": "Use OK, OK'd; avoid Okay in AP style.",
+    "cues": ["Okay", "okay"],
+    "guards": ["quoted speech"]
+  },
+  {
+    "id": "ap_email_spelling",
+    "title": "email vs. e-mail",
+    "level": "flag",
+    "severity": "low",
+    "description": "Use email, not e-mail.",
+    "cues": ["e-mail", "E-mail"],
+    "guards": []
+  },
+  {
+    "id": "ap_website_spelling",
+    "title": "website vs. Web site",
+    "level": "flag",
+    "severity": "low",
+    "description": "Use website (one word, lowercase), not Web site.",
+    "cues": ["Web site", "web site"],
+    "guards": []
+  },
+  {
+    "id": "ap_internet_lowercase",
+    "title": "internet lowercase",
+    "level": "flag",
+    "severity": "low",
+    "description": "Use internet (lowercase).",
+    "cues": ["Internet"],
+    "guards": ["start of sentence"]
+  },
+  {
+    "id": "ap_ages_format",
+    "title": "Ages: figures; hyphenate before noun",
+    "level": "flag",
+    "severity": "medium",
+    "description": "Always use figures for ages; hyphenate as adjective (a 5-year-old boy).",
+    "cues": [" year old", " years old"],
+    "guards": ["quoted speech"]
+  },
+  {
+    "id": "ap_dimensions",
+    "title": "Dimensions and sizes",
+    "level": "flag",
+    "severity": "low",
+    "description": "Use figures and hyphenate adjectival forms (a 9-by-12 rug).",
+    "cues": [" x ", " by "],
+    "guards": ["mathematical expressions"]
+  },
+  {
+    "id": "ap_money_format",
+    "title": "Money format",
+    "level": "flag",
+    "severity": "medium",
+    "description": "Use $ with figures; prefer $3 million over 3 million dollars.",
+    "cues": [" million dollars", " billion dollars"],
+    "guards": ["quoted speech"]
+  },
+  {
+    "id": "ap_time_ranges",
+    "title": "Time ranges format",
+    "level": "flag",
+    "severity": "low",
+    "description": "Use 'from 10 a.m. to 2 p.m.'; avoid 10am-2pm and en dashes without spaces.",
+    "cues": ["am-", "pm-", "AM-", "PM-", "10am", "2pm", "10AM", "2PM"],
+    "guards": []
+  },
+  {
+    "id": "ap_single_space_after_period",
+    "title": "Single space after period",
+    "level": "flag",
+    "severity": "low",
+    "description": "Use one space after a period.",
+    "cues": [".  ", "?  ", "!  "],
+    "guards": ["monospace code"]
+  },
+  {
+    "id": "ap_toward",
+    "title": "toward, not towards",
+    "level": "flag",
+    "severity": "low",
+    "description": "Use toward (not towards).",
+    "cues": ["towards"],
+    "guards": ["quoted speech"]
+  },
+  {
+    "id": "ap_health_care",
+    "title": "health care two words",
+    "level": "flag",
+    "severity": "low",
+    "description": "Use health care (two words).",
+    "cues": ["healthcare"],
+    "guards": []
+  },
+  {
+    "id": "ap_mph_lowercase",
+    "title": "mph lowercase",
+    "level": "flag",
+    "severity": "low",
+    "description": "Use mph (lowercase).",
+    "cues": ["MPH"],
+    "guards": []
+  },
+  {
+    "id": "ap_decades",
+    "title": "Decades style",
+    "level": "flag",
+    "severity": "low",
+    "description": "Use 1980s or '80s; avoid 1980's or 80's.",
+    "cues": ["1980's", " 80's", " 90's"],
+    "guards": []
+  },
+  {
+    "id": "ap_midnight_no_12am",
+    "title": "Midnight notation",
+    "level": "flag",
+    "severity": "medium",
+    "description": "Use midnight, not 12 a.m.",
+    "cues": ["12:00 AM", "12 AM"],
+    "guards": ["transport schedules"]
+  },
+  {
+    "id": "ap_noon_no_12pm",
+    "title": "Noon notation",
+    "level": "flag",
+    "severity": "medium",
+    "description": "Use noon, not 12 p.m.",
+    "cues": ["12:00 PM", "12 PM"],
+    "guards": ["transport schedules"]
+  },
+  {
+    "id": "ap_full_date_comma",
+    "title": "Comma in full dates",
+    "level": "flag",
+    "severity": "low",
+    "description": "Use a comma in full dates: Sept. 5, 2025. Flag missing comma.",
+    "cues": ["September 5 2025", "Sept. 5 2025"],
+    "guards": []
+  },
+  {
+    "id": "ap_month_leading_zero",
+    "title": "No leading zero in dates",
+    "level": "flag",
+    "severity": "low",
+    "description": "Avoid leading zeros in dates (Sept. 05).",
+    "cues": [
+      " 01,",
+      " 02,",
+      " 03,",
+      " 04,",
+      " 05,",
+      " 06,",
+      " 07,",
+      " 08,",
+      " 09,"
+    ],
+    "guards": ["tabular data"]
+  },
+  {
+    "id": "ap_ly_adverbs_no_hyphen",
+    "title": "No hyphen after -ly adverbs",
+    "level": "flag",
+    "severity": "low",
+    "description": "Do not hyphenate after adverbs ending in -ly.",
+    "cues": ["ly-"],
+    "guards": []
+  },
+  {
+    "id": "ap_fraction_style",
+    "title": "Spell out simple fractions",
+    "level": "flag",
+    "severity": "low",
+    "description": "Spell out simple fractions under 1 (two-thirds), avoid 2/3 in narrative.",
+    "cues": [" 1/2", " 1/3", " 2/3", " 3/4", " 1/4"],
+    "guards": ["recipes", "mathematical notation"]
+  },
+  {
+    "id": "ap_city_state_postal",
+    "title": "City/state postal codes",
+    "level": "flag",
+    "severity": "medium",
+    "description": "Avoid postal abbreviations with city names in narrative (use Maryland, not MD).",
+    "cues": [" MD)", " MD,", " CA)", " CA,", " NY)", " NY,"],
+    "guards": ["mailing addresses"]
+  },
+  {
+    "id": "ap_composition_quotes_basic",
+    "title": "Titles of works in quotes",
+    "level": "flag",
+    "severity": "low",
+    "description": "Put composition titles (books, movies, songs) in quotation marks; newspapers and magazines take no quotes or italics.",
+    "cues": [" The Matrix", " The Godfather", " To Kill a Mockingbird"],
+    "guards": ["already in quotation marks"]
+  }
+]
