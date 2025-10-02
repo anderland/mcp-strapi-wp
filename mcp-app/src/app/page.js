@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Select from '@/components/Select';
 import CodeBlock from '@/components/CodeBlock';
 import godzilla from '../../data/godzilla.json';
@@ -17,6 +17,7 @@ export default function Home() {
     save: false,
     strapi: false,
     wp: false,
+    check: false,
   });
   const [corrected, setCorrected] = useState('');
   const [report, setReport] = useState(null);
@@ -27,6 +28,25 @@ export default function Home() {
   const [llmError, setLlmError] = useState(false);
   const [susError, setSusError] = useState(false);
   const [fcError, setFcError] = useState(false);
+
+  // Bring back explicit Fact-check query
+  const [factCheckQuery, setFactCheckQuery] = useState('');
+
+  // Last run timestamp (persisted)
+  const [lastRunAt, setLastRunAt] = useState(null);
+
+  // Last standalone fact-check result (JSON string)
+  const [factCheckRes, setFactCheckRes] = useState('(none)');
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('mcp_last_run');
+      if (raw) {
+        const last = JSON.parse(raw);
+        if (last?.timestamp) setLastRunAt(last.timestamp);
+      }
+    } catch {}
+  }, []);
 
   const run = async () => {
     setLoading((l) => ({ ...l, run: true }));
@@ -39,6 +59,10 @@ export default function Home() {
           text,
           stage,
           options: { clamp1500: !!clamp },
+          factCheckQuery:
+            factCheckQuery && factCheckQuery.trim()
+              ? factCheckQuery.trim()
+              : undefined,
         }),
       });
       const data = await res.json();
@@ -47,27 +71,57 @@ export default function Home() {
       setReport(data?.result?.report || null);
       setHumanReview(data?.result?.full?.human_review_recommended || null);
       setFactCheckStatus(data?.result?.report?.fact_check || null);
-      setFactCheckTools(data?.result?.full?._workshop?.fact_check_tools || null);
+      setFactCheckTools(
+        data?.result?.full?._workshop?.fact_check_tools || null
+      );
 
       // Derive non-blocking error badges for UI
       const full = data?.result?.full;
       const rationale = Array.isArray(full?.rewrite?.rationale)
         ? full.rewrite.rationale.map((s) => String(s || '').toLowerCase())
         : [];
-      const hrReason = String(full?.human_review_recommended?.reason || '').toLowerCase();
+      const hrReason = String(
+        full?.human_review_recommended?.reason || ''
+      ).toLowerCase();
       const susRat = Array.isArray(full?._workshop?.sus?.rationale)
         ? full._workshop.sus.rationale.map((s) => String(s || '').toLowerCase())
         : [];
       const fcErr = Boolean(full?._workshop?.fact_check_tools?.error);
 
       const llmErr =
-        rationale.some((s) => s.includes('fallback: llm error') || s.includes('fallback: invalid json')) ||
-        hrReason.includes('invalid json from rewrite agent');
+        rationale.some(
+          (s) =>
+            s.includes('fallback: llm error') ||
+            s.includes('fallback: invalid json')
+        ) || hrReason.includes('invalid json from rewrite agent');
       const susErr = susRat.some((s) => s.includes('sus parse error'));
 
       setLlmError(llmErr);
       setSusError(susErr);
       setFcError(fcErr);
+
+      // Persist last run (bounded history and single last entry)
+      try {
+        const timestamp = new Date().toISOString();
+        const last = {
+          text,
+          stage,
+          factCheckQuery: factCheckQuery?.trim() || '',
+          corrected_text: data?.result?.corrected_text || '',
+          report: data?.result?.report || null,
+          full: data?.result?.full || null,
+          timestamp,
+        };
+        localStorage.setItem('mcp_last_run', JSON.stringify(last));
+        let arr = [];
+        try {
+          arr = JSON.parse(localStorage.getItem('mcp_runs') || '[]') || [];
+        } catch {}
+        arr.unshift(last);
+        if (arr.length > 5) arr = arr.slice(0, 5);
+        localStorage.setItem('mcp_runs', JSON.stringify(arr));
+        setLastRunAt(timestamp);
+      } catch {}
     } finally {
       setLoading((l) => ({ ...l, run: false }));
     }
@@ -197,8 +251,66 @@ export default function Home() {
                     ))}
                   </Select>
                   <p className='mt-1 text-[11px] text-gray-500 dark:text-gray-400'>
-                    Fact-check triggers at Stage 6.
+                    Fact-check gate triggers at Stage 6.{' '}
+                    {/* {lastRunAt && (
+                      <span className='ml-2'>
+                        Last run: {new Date(lastRunAt).toLocaleString()}
+                      </span>
+                    )} */}
                   </p>
+                </div>
+              </div>
+              <div className='mt-3'>
+                <label
+                  htmlFor='factcheck-query'
+                  className='block text-xs font-medium text-gray-700 dark:text-gray-300'
+                >
+                  Fact-check query
+                </label>
+                <div className='flex gap-2'>
+                  <input
+                    id='factcheck-query'
+                    type='text'
+                    value={factCheckQuery}
+                    onChange={(e) => setFactCheckQuery(e.target.value)}
+                    placeholder='e.g., the claim you want validated'
+                    className='mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm leading-6 text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-blue-600 focus:outline-none dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-gray-500 dark:focus:ring-blue-500'
+                  />
+                  <button
+                    type='button'
+                    disabled={loading.check || !factCheckQuery.trim()}
+                    onClick={async () => {
+                      setLoading((l) => ({ ...l, check: true }));
+                      try {
+                        const res = await fetch('/api/factcheck', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            query: factCheckQuery.trim(),
+                            languageCode: 'en',
+                            maxAgeDays: 365,
+                            pageSize: 3,
+                          }),
+                        });
+                        const data = await res.json();
+                        setFactCheckRes(JSON.stringify(data, null, 2));
+                      } catch (e) {
+                        setFactCheckRes(
+                          JSON.stringify(
+                            { success: false, error: String(e?.message || e) },
+                            null,
+                            2
+                          )
+                        );
+                      } finally {
+                        setLoading((l) => ({ ...l, check: false }));
+                      }
+                    }}
+                    className='self-start mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-900 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed dark:border-white/10 dark:bg-white/10 dark:text-white dark:hover:bg-white/20'
+                    title='Run a standalone fact-check query'
+                  >
+                    {loading.check ? 'Checking…' : 'Run Check'}
+                  </button>
                 </div>
               </div>
             </div>
@@ -215,15 +327,24 @@ export default function Home() {
                   {factCheckStatus?.enabled && (
                     <span
                       className='inline-flex items-center gap-x-1.5 rounded-md px-2 py-1 text-xs font-normal text-gray-900 inset-ring inset-ring-gray-200 dark:text-white dark:inset-ring-white/10'
-                      title={factCheckStatus?.used ? 'Fact-check used for this run' : 'Fact-check enabled'}
+                      title={
+                        factCheckStatus?.used
+                          ? 'Fact-check used for this run'
+                          : 'Fact-check enabled'
+                      }
                     >
-                      <svg viewBox='0 0 16 16' aria-hidden='true' className='size-3 fill-green-600 dark:fill-green-400'>
+                      <svg
+                        viewBox='0 0 16 16'
+                        aria-hidden='true'
+                        className='size-3 fill-green-600 dark:fill-green-400'
+                      >
                         <path d='M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm3.78 5.72a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0l-2-2a.75.75 0 0 1 1.06-1.06L6.5 9.19l3.72-3.72a.75.75 0 0 1 1.06 0Z' />
                       </svg>
                       Fact-check {factCheckStatus?.used ? 'active' : 'enabled'}
                       {factCheckTools?.signals?.review_count > 0 && (
                         <span className='ml-1 text-[10px] text-gray-600 dark:text-gray-400'>
-                          • {factCheckTools.signals.review_count} review{factCheckTools.signals.review_count === 1 ? '' : 's'}
+                          • {factCheckTools.signals.review_count} review
+                          {factCheckTools.signals.review_count === 1 ? '' : 's'}
                         </span>
                       )}
                     </span>
@@ -234,8 +355,12 @@ export default function Home() {
                       className='inline-flex items-center gap-x-1.5 rounded-md px-2 py-1 text-xs font-normal text-red-700 inset-ring inset-ring-red-200 dark:text-red-300 dark:inset-ring-red-900/40'
                       title='Model output could not be parsed as JSON. Output suppressed.'
                     >
-                      <svg viewBox='0 0 16 16' aria-hidden='true' className='size-3 fill-red-600 dark:fill-red-400'>
-                        <path d='M8.982 1.566a1.5 1.5 0 0 0-1.964 0L.165 7.154c-.89.79-.325 2.29.982 2.29h13.706c1.307 0 1.872-1.5.982-2.29L8.982 1.566zM8 5c.414 0 .75.336.75.75v3.5a.75.75 0 0 1-1.5 0v-3.5C7.25 5.336 7.586 5 8 5zm0 7a1 1 0 1 1 0-2 1 1 0 0 1 0 2z'/>
+                      <svg
+                        viewBox='0 0 16 16'
+                        aria-hidden='true'
+                        className='size-3 fill-red-600 dark:fill-red-400'
+                      >
+                        <path d='M8.982 1.566a1.5 1.5 0 0 0-1.964 0L.165 7.154c-.89.79-.325 2.29.982 2.29h13.706c1.307 0 1.872-1.5.982-2.29L8.982 1.566zM8 5c.414 0 .75.336.75.75v3.5a.75.75 0 0 1-1.5 0v-3.5C7.25 5.336 7.586 5 8 5zm0 7a1 1 0 1 1 0-2 1 1 0 0 1 0 2z' />
                       </svg>
                       Model JSON error
                     </span>
@@ -246,8 +371,12 @@ export default function Home() {
                       className='inline-flex items-center gap-x-1.5 rounded-md px-2 py-1 text-xs font-normal text-yellow-800 inset-ring inset-ring-yellow-200 dark:text-yellow-300 dark:inset-ring-yellow-900/40'
                       title='SUS agent output could not be parsed.'
                     >
-                      <svg viewBox='0 0 16 16' aria-hidden='true' className='size-3 fill-yellow-600 dark:fill-yellow-400'>
-                        <path d='M7.001 1.5a1 1 0 0 1 1.998 0l.37 7.403a1 1 0 0 1-1 .997H7.63a1 1 0 0 1-1-.997L7 1.5h.001zM9 13a1 1 0 1 1-2 0 1 1 0 0 1 2 0z'/>
+                      <svg
+                        viewBox='0 0 16 16'
+                        aria-hidden='true'
+                        className='size-3 fill-yellow-600 dark:fill-yellow-400'
+                      >
+                        <path d='M7.001 1.5a1 1 0 0 1 1.998 0l.37 7.403a1 1 0 0 1-1 .997H7.63a1 1 0 0 1-1-.997L7 1.5h.001zM9 13a1 1 0 1 1-2 0 1 1 0 0 1 2 0z' />
                       </svg>
                       SUS parse error
                     </span>
@@ -258,8 +387,12 @@ export default function Home() {
                       className='inline-flex items-center gap-x-1.5 rounded-md px-2 py-1 text-xs font-normal text-yellow-800 inset-ring inset-ring-yellow-200 dark:text-yellow-300 dark:inset-ring-yellow-900/40'
                       title='Fact-check tools reported an error (see JSON report for details).'
                     >
-                      <svg viewBox='0 0 16 16' aria-hidden='true' className='size-3 fill-yellow-600 dark:fill-yellow-400'>
-                        <path d='M7.001 1.5a1 1 0 0 1 1.998 0l.37 7.403a1 1 0 0 1-1 .997H7.63a1 1 0 0 1-1-.997L7 1.5h.001zM9 13a1 1 0 1 1-2 0 1 1 0 0 1 2 0z'/>
+                      <svg
+                        viewBox='0 0 16 16'
+                        aria-hidden='true'
+                        className='size-3 fill-yellow-600 dark:fill-yellow-400'
+                      >
+                        <path d='M7.001 1.5a1 1 0 0 1 1.998 0l.37 7.403a1 1 0 0 1-1 .997H7.63a1 1 0 0 1-1-.997L7 1.5h.001zM9 13a1 1 0 1 1-2 0 1 1 0 0 1 2 0z' />
                       </svg>
                       Fact-check error
                     </span>
@@ -317,6 +450,19 @@ export default function Home() {
                 </button>
               </div>
             </div>
+            <div className='mt-10'>
+              <div className='block text-sm font-medium font-display text-gray-900 dark:text-white'>
+                FactCheck Report
+              </div>
+              <CodeBlock
+                label='JSON'
+                language='json'
+                code={factCheckRes}
+                collapse
+                className='mt-2'
+              />
+            </div>
+
             <div className='mt-10'>
               <div className='block text-sm font-medium font-display text-gray-900 dark:text-white'>
                 Report

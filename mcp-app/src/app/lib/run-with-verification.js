@@ -4,11 +4,7 @@ import { fetchVerification } from '@/mcp/clients.js';
 // Modes:
 // - off: disable fact-check entirely
 // - preview: run a single query provided by client and attach results (non-blocking)
-// - auto: scan the whole text for claims and run multiple queries automatically (non-blocking by default)
-const MODE = process.env.FACTCHECK_MODE || 'off'; // "off" | "preview" | "auto"
-const MAX_CLAIMS = Number.parseInt(process.env.FACTCHECK_MAX_CLAIMS ?? '5');
-const MIN_SENT_LEN = Number.parseInt(process.env.FACTCHECK_MIN_SENT_LEN ?? '40');
-const MAX_SENT_LEN = Number.parseInt(process.env.FACTCHECK_MAX_SENT_LEN ?? '240');
+const MODE = process.env.FACTCHECK_MODE || 'off'; // "off" | "preview"
 
 function escapeRegExp(str) {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -41,106 +37,6 @@ function hasFiniteVerb(s = '') {
   );
 }
 
-async function runAutoFactCheck(mcpClient, baseText, stage, result) {
-  try {
-    if (!mcpClient) return result;
-
-    const sentences = splitIntoSentences(baseText);
-    const candidates = sentences
-      .filter((s) => s.length >= MIN_SENT_LEN && s.length <= MAX_SENT_LEN && hasFiniteVerb(s))
-      .slice(0, Math.max(1, MAX_CLAIMS));
-
-    const checks = await Promise.all(
-      candidates.map(async (q) => {
-        const fc = await fetchVerification(mcpClient, {
-          query: q,
-          languageCode: 'en',
-          maxAgeDays: 365,
-          pageSize: 3,
-        });
-        return { query: q, fc };
-      })
-    );
-
-    const items = checks.map((r) => ({
-      query: r.query,
-      signals: r.fc?.signals || { has_reviews: false },
-      results: r.fc?.results || [],
-    }));
-
-    // Aggregate a simple rating bucket per claim
-    function bucketCount(sig) {
-      const c = sig?.ratings || {};
-      return {
-        support: Number(c.support || 0),
-        mixed: Number(c.mixed || 0),
-        dispute: Number(c.dispute || 0),
-        clarification: Number(c.clarification || 0),
-      };
-    }
-
-    const disputed = items.filter((it) => {
-      const b = bucketCount(it.signals);
-      return it.signals?.has_reviews && b.dispute > b.support && (b.dispute >= 1);
-    });
-
-    // Attach to workshop block
-    result._workshop = result._workshop || {};
-    result._workshop.fact_check_tools = {
-      mode: 'auto',
-      claims: items,
-    };
-
-    // Add analysis findings entries
-    result.analysis = result.analysis || { findings: [], tone: { polarity: 'neutral', confidence: 0.5 } };
-    result.analysis.findings = result.analysis.findings || [];
-    for (const it of disputed.slice(0, 3)) {
-      const snippet = (it.query || '').slice(0, 80);
-      result.analysis.findings.push({
-        rule_id: 'factcheck-dispute',
-        title: 'Claim disputed by external fact-checks',
-        level: 'hard',
-        severity: 0.85,
-        confidence: 0.6,
-        evidence_snippet: snippet,
-        cues_matched: ['fact-check-tools'],
-        guard_hits: [],
-      });
-    }
-
-    // Optional gating from Stage 6+: remove sentences strongly disputed by external fact-checks
-    if (stage >= 6 && result?.rewrite?.text) {
-      const text = result.rewrite.text;
-      const allSentences = splitIntoSentences(text);
-      const disputedQueries = new Set(disputed.map((d) => d.query.toLowerCase()));
-      const kept = [];
-      const removed = [];
-      for (const s of allSentences) {
-        const lower = s.toLowerCase();
-        // Remove if sentence is identical or contains a disputed query substring (simple heuristic)
-        const hit = Array.from(disputedQueries).some((q) => lower.includes(q.toLowerCase()));
-        if (hit) removed.push(s); else kept.push(s);
-      }
-      const filtered = kept.join(' ').trim();
-      if (filtered && filtered !== text) {
-        result.rewrite.ops = result.rewrite.ops || [];
-        result.rewrite.rationale = result.rewrite.rationale || [];
-        result.rewrite.ops.push({ rule_id: 'factcheck-gate', before: text, after: filtered });
-        result.rewrite.rationale.push('Applied fact-check gate: removed sentence(s) disputed by external reviews.');
-        result.rewrite.text = filtered;
-      }
-    }
-
-    return result;
-  } catch (e) {
-    // Non-fatal
-    result._workshop = result._workshop || {};
-    result._workshop.fact_check_tools = result._workshop.fact_check_tools || {};
-    result._workshop.fact_check_tools.error = e?.message || String(e);
-    return result;
-  }
-}
-
 export async function runWithVerification(mcpClient, input) {
   const { text, stage, factCheckQuery } = input || {};
 
@@ -166,7 +62,7 @@ export async function runWithVerification(mcpClient, input) {
 
   if (!mcpClient || MODE === 'off') return result;
 
-  // 2A) preview mode: single explicit query
+  // 2A) preview mode: single explicit query (and apply gating if disputed)
   if (MODE === 'preview' && factCheckQuery) {
     const fc = await fetchVerification(mcpClient, {
       query: factCheckQuery,
@@ -181,15 +77,73 @@ export async function runWithVerification(mcpClient, input) {
         signals: fc.signals,
         results: fc.results,
       };
+
+      // Surface soft evidence at Stage 6 when any reviews exist (advisory only)
+      try {
+        const sig = fc?.signals || {};
+        const ratings = sig?.ratings || {};
+        if (sig?.has_reviews && Number(stage ?? 0) >= 6) {
+          result.analysis = result.analysis || { findings: [], tone: { polarity: 'neutral', confidence: 0.5 } };
+          result.analysis.findings = result.analysis.findings || [];
+          const summary = `support:${Number(ratings.support||0)} mixed:${Number(ratings.mixed||0)} dispute:${Number(ratings.dispute||0)}`;
+          result.analysis.findings.push({
+            rule_id: 'factcheck-evidence',
+            title: 'External fact-check evidence available',
+            level: 'soft',
+            severity: 0.3,
+            confidence: 0.6,
+            evidence_snippet: summary,
+            cues_matched: ['fact-check-tools'],
+            guard_hits: [],
+          });
+        }
+      } catch {}
+
+      // If disputed by external reviews, gate at Stage 6+
+      try {
+        const sig = fc?.signals || {};
+        const ratings = sig?.ratings || {};
+        const disputed = !!sig?.has_reviews && Number(ratings.dispute || 0) > Number(ratings.support || 0);
+        if (disputed && Number(stage ?? 0) >= 6 && result?.rewrite?.text) {
+          const textBody = result.rewrite.text;
+          const sentences = splitIntoSentences(textBody);
+          const q = String(factCheckQuery || '').toLowerCase().trim();
+          if (q) {
+            const kept = [];
+            const removed = [];
+            for (const s of sentences) {
+              const hit = s.toLowerCase().includes(q);
+              if (hit) removed.push(s); else kept.push(s);
+            }
+            const filtered = kept.join(' ').trim();
+            if (filtered && filtered !== textBody) {
+              result.rewrite.ops = result.rewrite.ops || [];
+              result.rewrite.rationale = result.rewrite.rationale || [];
+              result.rewrite.ops.push({ rule_id: 'factcheck-gate', before: textBody, after: filtered });
+              result.rewrite.rationale.push('Applied fact-check gate (preview): removed sentence(s) disputed by external reviews.');
+              result.rewrite.text = filtered;
+
+              // Add a finding
+              result.analysis = result.analysis || { findings: [], tone: { polarity: 'neutral', confidence: 0.5 } };
+              result.analysis.findings = result.analysis.findings || [];
+              result.analysis.findings.push({
+                rule_id: 'factcheck-dispute',
+                title: 'Claim disputed by external fact-checks (preview)',
+                level: 'hard',
+                severity: 0.85,
+                confidence: 0.6,
+                evidence_snippet: q.slice(0, 80),
+                cues_matched: ['fact-check-tools'],
+                guard_hits: [],
+              });
+            }
+          }
+        }
+      } catch {}
     }
     return result;
   }
 
-  // 2B) auto mode: scan entire text and check multiple sentences
-  if (MODE === 'auto') {
-    const base = result?.rewrite?.text || text || '';
-    return await runAutoFactCheck(mcpClient, base, Number(stage ?? 0), result);
-  }
 
   return result;
 }

@@ -7,7 +7,7 @@ Agent + MCP workflow demo. The core application is mcp-app (a Next.js app) that 
 - Node.js LTS
 - An OpenAI API key
 
-Optional (if you want to save drafts):
+(if you want to save drafts):
 
 - Strapi running locally or remotely and an API token
 - A WordPress site with Application Passwords enabled
@@ -69,7 +69,7 @@ npm run dev
 
 - Paste source text, pick a stage, and Run
 - Review the JSON report and the rewrite
-- Optionally save to Strapi or WordPress via the selector and Save
+- Save to Strapi or WordPress
 - Load Drafts to verify the saved items for each
 
 ## Ruleset pipeline (stages 0–7)
@@ -100,9 +100,9 @@ Environment controls:
 
 ## Environment configuration
 
-Create mcp-app/.env.local with your provider and optional FactCheck settings. Restart the dev server after changes.
+Create mcp-app/.env.local with your provider and factCheck settings. Restart the dev server after changes.
 
-### LLM provider (OpenAI default, optional Gemini)
+### LLM provider (OpenAI default or Gemini)
 
 - LLM_PROVIDER=openai|gemini (default openai)
 - OPENAI_MODEL=gpt-4o-mini (default)
@@ -115,6 +115,7 @@ Create mcp-app/.env.local with your provider and optional FactCheck settings. Re
 Examples:
 
 OpenAI
+
 ```dotenv
 LLM_PROVIDER=openai
 OPENAI_MODEL=gpt-4o-mini
@@ -122,6 +123,7 @@ OPENAI_API_KEY=sk-...
 ```
 
 Gemini
+
 ```dotenv
 LLM_PROVIDER=gemini
 GEMINI_MODEL=gemini-2.5-flash
@@ -129,6 +131,7 @@ GOOGLE_API_KEY=AIza...
 ```
 
 Troubleshooting Gemini
+
 - Ensure the Generative Language API is enabled in your GCP project (Google AI Studio API)
 - If you see 400 "unexpected model name format": remove any "(default)" suffix; use gemini-2.5-flash or gemini-1.5-flash
 - If your other app uses models/gemini-..., that’s fine here; we strip the "models/" prefix automatically
@@ -136,22 +139,25 @@ Troubleshooting Gemini
 
 ### FactCheck (Google Fact Check Tools API)
 
-- FACTCHECK_MODE=off|preview|auto (default off)
-  - preview: runs one explicit query (UI used to expose a field; now we auto-scan, so preview is optional)
-  - auto: full-text, sentence-level claim checks (bounded by limits below)
+- FACTCHECK_MODE=off|preview (default off)
+  - preview: uses the explicit Fact-check query field in the UI. If external reviews exist and dispute outweighs support, the gate may remove sentences at Stage 6+.
 - One of the following API key envs (any one will work):
   - GOOGLE_FACT_CHECK_TOOLS_KEY=...
   - FACTCHECKTOOLS_API_KEY=...
   - FACT_CHECK_API_KEY=...
 
+UI notes
+
+- The UI shows a “Fact-check query” input. When FACTCHECK_MODE=preview, gating uses this explicit query.
+- A “Last run:” timestamp appears near the stage selector (persisted in localStorage).
+
 Tuning (optional)
-- FACTCHECK_MAX_CLAIMS=5 (max sentences auto-checked)
-- FACTCHECK_MIN_SENT_LEN=40
-- FACTCHECK_MAX_SENT_LEN=240
+
 - FACTCHECK_CACHE_TTL_MS=300000 (5 minutes)
 - FACTCHECK_CACHE_MAX=200
 
 Behavior by stage
+
 - Stage 6: Fact-check gate may remove sentences only when external reviews exist and dispute outweighs support
 - Stage 7: SUS agent runs; SUS gate may remove sentences flagged medium/high (e.g., fictional terms) regardless of external reviews
 
@@ -170,6 +176,7 @@ Behavior by stage
 - POST /api/run
 
 - Body: `{ text: string, stage?: number, options?: { clamp1500?: boolean } }`
+
   - Returns: `{ success, result: { corrected_text, report, agent, full } }`
   - The `full` object may include `human_review_recommended` when suspicious content is detected
 
