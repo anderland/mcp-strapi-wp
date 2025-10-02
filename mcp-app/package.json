@@ -15,9 +15,11 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@headlessui/react": "^2.2.9",
     "@heroicons/react": "^2.2.0",
     "@langchain/core": "^0.3.0",
+    "@langchain/google-genai": "^0.2.18",
     "@langchain/openai": "^0.3.0",
     "@modelcontextprotocol/sdk": "^1.18.2",
     "axios": "^1.12.2",

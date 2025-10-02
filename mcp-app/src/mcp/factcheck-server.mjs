@@ -8,6 +8,20 @@ import axios from 'axios';
 
 const BASE = 'https://factchecktools.googleapis.com/v1alpha1/claims:search';
 
+// Simple in-memory TTL cache to avoid repeated HTTP requests to Google
+const FC_CACHE_TTL_MS = Number(process.env.FACTCHECK_CACHE_TTL_MS ?? 300000); // 5 min
+const FC_CACHE_MAX = Number(process.env.FACTCHECK_CACHE_MAX ?? 200);
+const fcCache = new Map(); // key -> { ts, value }
+function fcCachePrune() {
+  try {
+    while (fcCache.size > FC_CACHE_MAX) {
+      const k = fcCache.keys().next().value;
+      if (typeof k === 'undefined') break;
+      fcCache.delete(k);
+    }
+  } catch {}
+}
+
 function getApiKey() {
   return (
     process.env.GOOGLE_FACT_CHECK_TOOLS_KEY ||
@@ -35,6 +49,20 @@ async function googleFactCheckSearch({
 }) {
   const key = getApiKey();
   if (!key) return { results: [], signals: { has_reviews: false } };
+
+  // Cache key based on effective request params
+  const cacheKey = JSON.stringify({
+    query,
+    languageCode,
+    maxAgeDays,
+    pageSize,
+    reviewPublisherSiteFilter,
+  });
+  const now = Date.now();
+  const hit = fcCache.get(cacheKey);
+  if (hit && now - hit.ts < FC_CACHE_TTL_MS) {
+    return hit.value;
+  }
 
   const params = {
     key,
@@ -82,7 +110,10 @@ async function googleFactCheckSearch({
     latest_review_date: dates.at(-1) || null,
   };
 
-  return { results, signals };
+  const value = { results, signals };
+  fcCache.set(cacheKey, { ts: now, value });
+  fcCachePrune();
+  return value;
 }
 
 class FactCheckMCPServer {

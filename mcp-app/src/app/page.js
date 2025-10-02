@@ -22,6 +22,8 @@ export default function Home() {
   const [report, setReport] = useState(null);
   const [stage, setStage] = useState(0);
   const [humanReview, setHumanReview] = useState(null);
+  const [factCheckStatus, setFactCheckStatus] = useState(null);
+  const [factCheckTools, setFactCheckTools] = useState(null);
 
   const run = async () => {
     setLoading((l) => ({ ...l, run: true }));
@@ -30,13 +32,21 @@ export default function Home() {
       const res = await fetch('/api/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, stage, options: { clamp1500: !!clamp } }),
+        body: JSON.stringify({
+          text,
+          stage,
+          options: { clamp1500: !!clamp },
+        }),
       });
       const data = await res.json();
       setResult(JSON.stringify(data, null, 2));
       setCorrected(data?.result?.corrected_text || '');
       setReport(data?.result?.report || null);
       setHumanReview(data?.result?.full?.human_review_recommended || null);
+      setFactCheckStatus(data?.result?.report?.fact_check || null);
+      setFactCheckTools(
+        data?.result?.full?._workshop?.fact_check_tools || null
+      );
     } finally {
       setLoading((l) => ({ ...l, run: false }));
     }
@@ -165,6 +175,9 @@ export default function Home() {
                       <option key={n} value={String(n)}>{`Stage ${n}`}</option>
                     ))}
                   </Select>
+                  <p className='mt-1 text-[11px] text-gray-500 dark:text-gray-400'>
+                    Fact-check triggers at Stage 6.
+                  </p>
                 </div>
               </div>
             </div>
@@ -177,8 +190,33 @@ export default function Home() {
                 >
                   Output Text
                 </label>
-                {humanReview?.flag && stage >= 6 && (
-                  <div className='flex items-center mb-0.5'>
+                <div className='flex items-center gap-2 mb-0.5'>
+                  {factCheckStatus?.enabled && (
+                    <span
+                      className='inline-flex items-center gap-x-1.5 rounded-md px-2 py-1 text-xs font-normal text-gray-900 inset-ring inset-ring-gray-200 dark:text-white dark:inset-ring-white/10'
+                      title={
+                        factCheckStatus?.used
+                          ? 'Fact-check used for this run'
+                          : 'Fact-check enabled'
+                      }
+                    >
+                      <svg
+                        viewBox='0 0 16 16'
+                        aria-hidden='true'
+                        className='size-3 fill-green-600 dark:fill-green-400'
+                      >
+                        <path d='M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm3.78 5.72a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0l-2-2a.75.75 0 0 1 1.06-1.06L6.5 9.19l3.72-3.72a.75.75 0 0 1 1.06 0Z' />
+                      </svg>
+                      Fact-check {factCheckStatus?.used ? 'active' : 'enabled'}
+                      {factCheckTools?.signals?.review_count > 0 && (
+                        <span className='ml-1 text-[10px] text-gray-600 dark:text-gray-400'>
+                          • {factCheckTools.signals.review_count} review
+                          {factCheckTools.signals.review_count === 1 ? '' : 's'}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                  {humanReview?.flag && stage >= 6 && (
                     <span
                       className={`inline-flex items-center gap-x-1.5 rounded-md px-2 py-1 text-xs font-normal text-gray-900 inset-ring inset-ring-gray-200 dark:text-white dark:inset-ring-white/10 ${
                         humanReview.severity === 'critical' ? ' ' : ' '
@@ -201,13 +239,8 @@ export default function Home() {
                         ? 'required'
                         : 'recommended'}
                     </span>
-                    {/* {humanReview.details?.length > 0 && (
-                      <span className='text-xs text-gray-500 dark:text-gray-400'>
-                        {humanReview.details[0]}
-                      </span>
-                    )} */}
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
 
               <textarea

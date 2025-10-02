@@ -1,11 +1,38 @@
 import { ChatOpenAI } from '@langchain/openai';
+import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { RunnableSequence, RunnableMap } from '@langchain/core/runnables';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const LLM_PROVIDER = (process.env.LLM_PROVIDER || 'openai').toLowerCase();
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
 const DEFAULT_TEMPERATURE = Number(process.env.OPENAI_TEMPERATURE ?? 0.35);
+
+function getProvider() {
+  return (process.env.LLM_PROVIDER || 'openai').toLowerCase();
+}
+function getModelName() {
+  const provider = getProvider();
+  if (provider === 'gemini') {
+    // If no Google API key is present, fall back to OpenAI for safety
+    if (!process.env.GOOGLE_API_KEY) return OPENAI_MODEL;
+    return GEMINI_MODEL;
+  }
+  return OPENAI_MODEL;
+}
+function getLLM() {
+  const provider = getProvider();
+  const modelName = getModelName();
+  if (provider === 'gemini' && process.env.GOOGLE_API_KEY) {
+    return new ChatGoogleGenerativeAI({
+      model: modelName,
+      temperature: DEFAULT_TEMPERATURE,
+    });
+  }
+  return new ChatOpenAI({ model: modelName, temperature: DEFAULT_TEMPERATURE });
+}
 const ENV_STAGE = process.env.RULESET_STAGE;
 const ENV_RULESET_PATH = process.env.RULESET_PATH;
 // Feature flag: default OFF — when false, SUS gate drops flagged sentences
@@ -392,10 +419,42 @@ function makeTermRegex(term) {
   return new RegExp(`\\b${safe.replace(/\\s+/g, '[\\s-]+')}\\b`, 'i');
 }
 
-const llm = new ChatOpenAI({
-  model: DEFAULT_MODEL,
-  temperature: DEFAULT_TEMPERATURE,
-});
+const LLM_CACHE_ENABLED = truthyEnv('LLM_CACHE_ENABLED', 'true');
+const LLM_CACHE_TTL_MS = Number(process.env.LLM_CACHE_TTL_MS ?? 300000); // 5 min
+const LLM_CACHE_MAX = Number(process.env.LLM_CACHE_MAX ?? 200);
+const __llmCache = new Map(); // key -> { ts, value }
+function __llmCachePrune() {
+  try {
+    while (__llmCache.size > LLM_CACHE_MAX) {
+      const k = __llmCache.keys().next().value;
+      if (typeof k === 'undefined') break;
+      __llmCache.delete(k);
+    }
+  } catch {}
+}
+async function cachedLlmInvoke(messages, options) {
+  const modelName = getModelName();
+  const provider = getProvider();
+  if (!LLM_CACHE_ENABLED) return getLLM().invoke(messages, options);
+  const key = stableHash(
+    JSON.stringify({
+      provider,
+      model: modelName,
+      temperature: DEFAULT_TEMPERATURE,
+      messages,
+      options,
+    })
+  );
+  const now = Date.now();
+  const hit = __llmCache.get(key);
+  if (hit && now - hit.ts < LLM_CACHE_TTL_MS) {
+    return hit.value;
+  }
+  const res = await getLLM().invoke(messages, options);
+  __llmCache.set(key, { ts: now, value: res });
+  __llmCachePrune();
+  return res;
+}
 
 export const rulesetPipeline = RunnableSequence.from([
   RunnableMap.from({
@@ -429,7 +488,7 @@ export const rulesetPipeline = RunnableSequence.from([
     ];
 
     // --- Run rewrite (always) and SUS (stage ≥6) in parallel for latency ---
-    const rewritePromise = llm.invoke(messages, {
+    const rewritePromise = cachedLlmInvoke(messages, {
       response_format: { type: 'json_object' },
     });
 
@@ -440,7 +499,7 @@ export const rulesetPipeline = RunnableSequence.from([
         { role: 'system', content: susPrompt },
         { role: 'user', content: JSON.stringify({ TEXT }, null, 2) },
       ];
-      susPromise = llm.invoke(susMessages, {
+      susPromise = cachedLlmInvoke(susMessages, {
         response_format: { type: 'json_object' },
       });
     }
@@ -449,7 +508,6 @@ export const rulesetPipeline = RunnableSequence.from([
     try {
       res = await rewritePromise;
     } catch (e) {
-      // LLM call failed; produce a safe placeholder result
       res = {
         content: JSON.stringify(
           {
@@ -528,7 +586,6 @@ export const rulesetPipeline = RunnableSequence.from([
     }
 
     // Stage 7: apply SUS gate to rewrite.text
-    // Logic kept intentionally simple: if SUS flags medium/high terms, drop those sentences.
     if (STAGE >= 7 && sus) {
       const flaggedTerms = collectFlaggedTerms(sus);
       if (flaggedTerms.size) {
@@ -682,7 +739,7 @@ export const rulesetPipeline = RunnableSequence.from([
     parsed._workshop = {
       stage: STAGE,
       stage_titles: CHUNKS.slice(0, STAGE + 1).map((c) => c.title),
-      model: DEFAULT_MODEL,
+      model: getModelName(),
       sus_salvage: SUS_SALVAGE,
     };
     if (sus) parsed._workshop.sus = sus;

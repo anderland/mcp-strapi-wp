@@ -29,15 +29,29 @@ export async function POST(req) {
     const llmRewrite = res?.rewrite?.text || clipped;
     const corrected = llmRewrite;
 
+    const MODE = process.env.FACTCHECK_MODE || 'off';
+    const fact_check = {
+      enabled: MODE !== 'off',
+      connected: !!factcheck,
+      used: !!(res?._workshop?.fact_check_tools),
+      signals: res?._workshop?.fact_check_tools?.signals || null,
+    };
+
+    const LLM_PROVIDER = (process.env.LLM_PROVIDER || 'openai').toLowerCase();
+    const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+    const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+    const MODEL_NAME = LLM_PROVIDER === 'gemini' ? GEMINI_MODEL : OPENAI_MODEL;
+
     const agent = {
       version: res?.version || 'ap-demo/v1',
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      model: MODEL_NAME,
       catalog_version: res?.catalog_version,
       stage,
       findings_count: (res?.analysis?.findings || []).length,
       tone: res?.analysis?.tone || { polarity: 'neutral', confidence: 0.5 },
       status: 'ok',
       errors: [],
+      fact_check,
     };
 
     const report = agent;
