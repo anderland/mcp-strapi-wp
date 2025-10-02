@@ -8,7 +8,7 @@ import axios from 'axios';
 
 const BASE = 'https://factchecktools.googleapis.com/v1alpha1/claims:search';
 
-// Simple in-memory TTL cache to avoid repeated HTTP requests to Google
+// In-memory TTL cache to avoid repeated HTTP requests to Google
 const FC_CACHE_TTL_MS = Number(process.env.FACTCHECK_CACHE_TTL_MS ?? 300000); // 5 min
 const FC_CACHE_MAX = Number(process.env.FACTCHECK_CACHE_MAX ?? 200);
 const fcCache = new Map(); // key -> { ts, value }
@@ -50,7 +50,6 @@ async function googleFactCheckSearch({
   const key = getApiKey();
   if (!key) return { results: [], signals: { has_reviews: false } };
 
-  // Cache key based on effective request params
   const cacheKey = JSON.stringify({
     query,
     languageCode,
