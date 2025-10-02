@@ -44,7 +44,7 @@ export async function POST(req) {
 
     const agent = {
       version: res?.version || 'ap-demo/v1',
-      model: MODEL_NAME,
+      model: res?._workshop?.model || MODEL_NAME,
       catalog_version: res?.catalog_version,
       stage,
       findings_count: (res?.analysis?.findings || []).length,

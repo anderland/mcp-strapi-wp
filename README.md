@@ -98,6 +98,73 @@ Environment controls:
 - OPENAI_MODEL, OPENAI_TEMPERATURE
 - RULESET_STAGE (server default, 0–7) and RULESET_PATH (custom ruleset)
 
+## Environment configuration
+
+Create mcp-app/.env.local with your provider and optional FactCheck settings. Restart the dev server after changes.
+
+### LLM provider (OpenAI default, optional Gemini)
+
+- LLM_PROVIDER=openai|gemini (default openai)
+- OPENAI_MODEL=gpt-4o-mini (default)
+- GEMINI_MODEL=gemini-2.5-flash (default)
+  - You can also use gemini-1.5-flash
+  - If you accidentally include a prefix like models/gemini-2.5-flash or a suffix like (default), the app sanitizes it
+- GOOGLE_API_KEY=... (required when LLM_PROVIDER=gemini)
+- OPENAI_TEMPERATURE=0.35 (default)
+
+Examples:
+
+OpenAI
+```dotenv
+LLM_PROVIDER=openai
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_API_KEY=sk-...
+```
+
+Gemini
+```dotenv
+LLM_PROVIDER=gemini
+GEMINI_MODEL=gemini-2.5-flash
+GOOGLE_API_KEY=AIza...
+```
+
+Troubleshooting Gemini
+- Ensure the Generative Language API is enabled in your GCP project (Google AI Studio API)
+- If you see 400 "unexpected model name format": remove any "(default)" suffix; use gemini-2.5-flash or gemini-1.5-flash
+- If your other app uses models/gemini-..., that’s fine here; we strip the "models/" prefix automatically
+- If the model output includes markdown code fences, the app attempts to parse JSON robustly; an in-UI badge will show if parsing fails
+
+### FactCheck (Google Fact Check Tools API)
+
+- FACTCHECK_MODE=off|preview|auto (default off)
+  - preview: runs one explicit query (UI used to expose a field; now we auto-scan, so preview is optional)
+  - auto: full-text, sentence-level claim checks (bounded by limits below)
+- One of the following API key envs (any one will work):
+  - GOOGLE_FACT_CHECK_TOOLS_KEY=...
+  - FACTCHECKTOOLS_API_KEY=...
+  - FACT_CHECK_API_KEY=...
+
+Tuning (optional)
+- FACTCHECK_MAX_CLAIMS=5 (max sentences auto-checked)
+- FACTCHECK_MIN_SENT_LEN=40
+- FACTCHECK_MAX_SENT_LEN=240
+- FACTCHECK_CACHE_TTL_MS=300000 (5 minutes)
+- FACTCHECK_CACHE_MAX=200
+
+Behavior by stage
+- Stage 6: Fact-check gate may remove sentences only when external reviews exist and dispute outweighs support
+- Stage 7: SUS agent runs; SUS gate may remove sentences flagged medium/high (e.g., fictional terms) regardless of external reviews
+
+### Caching (optional)
+
+- LLM_CACHE_ENABLED=true (default)
+- LLM_CACHE_TTL_MS=300000
+- LLM_CACHE_MAX=200
+
+### Other flags
+
+- SUS_SALVAGE=false (default). When true, SUS-gated sentences try salvage by removing flagged terms instead of dropping whole sentences.
+
 ## API reference (from the Next.js app)
 
 - POST /api/run

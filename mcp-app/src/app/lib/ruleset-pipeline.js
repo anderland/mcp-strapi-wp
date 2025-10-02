@@ -7,18 +7,28 @@ import crypto from 'node:crypto';
 
 const LLM_PROVIDER = (process.env.LLM_PROVIDER || 'openai').toLowerCase();
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const DEFAULT_TEMPERATURE = Number(process.env.OPENAI_TEMPERATURE ?? 0.35);
 
 function getProvider() {
   return (process.env.LLM_PROVIDER || 'openai').toLowerCase();
+}
+function sanitizeModelName(name) {
+  try {
+    return String(name || '')
+      .replace(/\s*\(.*\)\s*$/,'')
+      .replace(/^models\//,'')
+      .trim();
+  } catch {
+    return String(name || '').trim();
+  }
 }
 function getModelName() {
   const provider = getProvider();
   if (provider === 'gemini') {
     // If no Google API key is present, fall back to OpenAI for safety
     if (!process.env.GOOGLE_API_KEY) return OPENAI_MODEL;
-    return GEMINI_MODEL;
+    return sanitizeModelName(GEMINI_MODEL);
   }
   return OPENAI_MODEL;
 }
@@ -26,10 +36,7 @@ function getLLM() {
   const provider = getProvider();
   const modelName = getModelName();
   if (provider === 'gemini' && process.env.GOOGLE_API_KEY) {
-    return new ChatGoogleGenerativeAI({
-      model: modelName,
-      temperature: DEFAULT_TEMPERATURE,
-    });
+    return new ChatGoogleGenerativeAI({ model: modelName, temperature: DEFAULT_TEMPERATURE, apiKey: process.env.GOOGLE_API_KEY });
   }
   return new ChatOpenAI({ model: modelName, temperature: DEFAULT_TEMPERATURE });
 }
@@ -125,6 +132,7 @@ const BASE_PROMPT = [
   '- Hedging terms ("reportedly," "allegedly," etc.) do NOT permit retaining any content that a higher-stage rule excludes.',
   '- Decisions must be derived from TEXT-only cues; do not use outside knowledge to judge plausibility, authority, or fictionality. If TEXT does not establish it, treat it as absent.',
   '- Do not echo RULESET or add commentary; return JSON only.',
+  '- Return pure JSON (no markdown code fences or backticks).',
 ];
 
 // Progressive chunks (0..6). Each stage includes all prior chunks *except* where later stages explicitly override.
@@ -435,14 +443,18 @@ function __llmCachePrune() {
 async function cachedLlmInvoke(messages, options) {
   const modelName = getModelName();
   const provider = getProvider();
-  if (!LLM_CACHE_ENABLED) return getLLM().invoke(messages, options);
+  const llm = getLLM();
+  // Sanitize call options per provider (Gemini doesn't support OpenAI-style response_format)
+  const callOptions = provider === 'gemini' ? {} : options || {};
+
+  if (!LLM_CACHE_ENABLED) return llm.invoke(messages, callOptions);
   const key = stableHash(
     JSON.stringify({
       provider,
       model: modelName,
       temperature: DEFAULT_TEMPERATURE,
       messages,
-      options,
+      options: callOptions,
     })
   );
   const now = Date.now();
@@ -450,7 +462,7 @@ async function cachedLlmInvoke(messages, options) {
   if (hit && now - hit.ts < LLM_CACHE_TTL_MS) {
     return hit.value;
   }
-  const res = await getLLM().invoke(messages, options);
+  const res = await llm.invoke(messages, callOptions);
   __llmCache.set(key, { ts: now, value: res });
   __llmCachePrune();
   return res;
@@ -528,10 +540,51 @@ export const rulesetPipeline = RunnableSequence.from([
       };
     }
 
+    // Normalize AIMessage content to a string for JSON parsing
+    function contentToString(msg) {
+      try {
+        if (!msg) return '';
+        const c = msg.content;
+        if (typeof c === 'string') return c;
+        if (Array.isArray(c)) {
+          return c
+            .map((p) => (typeof p === 'string' ? p : p?.text || ''))
+            .join('')
+            .trim();
+        }
+        return typeof c === 'object' ? JSON.stringify(c) : String(c ?? '');
+      } catch {
+        return '';
+      }
+    }
+
+    function parseJsonLoose(text) {
+      if (!text || typeof text !== 'string') return null;
+      let t = text.trim();
+      // Remove code fences like ```json ... ```
+      const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
+      if (fence && fence[1]) t = fence[1].trim();
+      // If still not parseable, try to extract the largest JSON object
+      const start = t.indexOf('{');
+      const end = t.lastIndexOf('}');
+      const candidate = start !== -1 && end !== -1 && end > start ? t.slice(start, end + 1) : t;
+      try {
+        return JSON.parse(candidate);
+      } catch {}
+      // Try a second pass removing trailing commas (simple heuristic)
+      try {
+        const noTrailingCommas = candidate
+          .replace(/,\s*([}\]])/g, '$1')
+          .replace(/\u201c|\u201d|\u2018|\u2019/g, '"');
+        return JSON.parse(noTrailingCommas);
+      } catch {}
+      return null;
+    }
+
     let parsed;
     try {
-      parsed =
-        typeof res.content === 'string' ? JSON.parse(res.content) : res.content;
+      const raw = contentToString(res);
+      parsed = parseJsonLoose(raw);
     } catch {
       parsed = null;
     }
@@ -563,10 +616,19 @@ export const rulesetPipeline = RunnableSequence.from([
     if (STAGE >= 6) {
       try {
         const susRes = await susPromise;
-        sus =
-          typeof susRes.content === 'string'
-            ? JSON.parse(susRes.content)
-            : susRes.content;
+        const rawSus = (function toText(m) {
+          try {
+            const c = m?.content;
+            if (typeof c === 'string') return c;
+            if (Array.isArray(c)) {
+              return c.map((p) => (typeof p === 'string' ? p : p?.text || '')).join('');
+            }
+            return typeof c === 'object' ? JSON.stringify(c) : String(c ?? '');
+          } catch {
+            return '';
+          }
+        })(susRes);
+        sus = rawSus ? parseJsonLoose(rawSus) : susRes?.content || null;
       } catch {
         sus = {
           version: 'sus/v1',
