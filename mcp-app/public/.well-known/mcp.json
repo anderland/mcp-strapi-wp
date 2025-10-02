@@ -1,0 +1,16 @@
+{
+  "name": "mcp-strapi-wp",
+  "version": "0.2.0",
+  "description": "MCP servers for Strapi and WordPress via Next.js SSE",
+  "homepage": "https://github.com/anderland/mcp-strapi-wp",
+  "endpoints": [
+    {
+      "type": "sse",
+      "url": "http://localhost:3000/api/mcp/strapi/sse"
+    },
+    {
+      "type": "sse",
+      "url": "http://localhost:3000/api/mcp/wordpress/sse"
+    }
+  ]
+}

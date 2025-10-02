@@ -8,6 +8,12 @@ const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const DEFAULT_TEMPERATURE = Number(process.env.OPENAI_TEMPERATURE ?? 0.35);
 const ENV_STAGE = process.env.RULESET_STAGE;
 const ENV_RULESET_PATH = process.env.RULESET_PATH;
+// Feature flag: default OFF — when false, SUS gate drops flagged sentences
+const SUS_SALVAGE = /^(1|true|yes)$/i.test(process.env.SUS_SALVAGE || 'false');
+
+function truthyEnv(name, def = 'false') {
+  return /^(1|true|yes)$/i.test(process.env[name] || def);
+}
 
 function stableHash(str) {
   return crypto.createHash('sha256').update(str).digest('hex');
@@ -25,12 +31,14 @@ function resolveRulesetPath() {
   if (ENV_RULESET_PATH && fs.existsSync(ENV_RULESET_PATH))
     return ENV_RULESET_PATH;
 
-  const candidates = [path.resolve(process.cwd(), 'data/ruleset_demo.json')];
+  const candidates = [
+    path.resolve(process.cwd(), 'data/ruleset.json'),
+  ];
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
   }
   throw new Error(
-    'Unable to locate ruleset_demo.json. Set RULESET_PATH or place the file under ./data/ or /mnt/data/.'
+    'Unable to locate ruleset JSON. Set RULESET_PATH or place ruleset.json under ./data/.'
   );
 }
 
@@ -122,14 +130,14 @@ const CHUNKS = [
     id: 2,
     title: 'Extraordinary Claim = Exclude (hard)',
     text: [
-      'OVERRIDE — EXTRAORDINARY CLAIMS WITHOUT IN‑TEXT CORROBORATION (MANDATORY):',
-      '- If a claim is extraordinary/improbable and either (a) lacks attribution, or (b) has only single‑source attribution with NO corroboration elsewhere in TEXT, exclude it from rewrite.text entirely.',
+      'OVERRIDE — EXTRAORDINARY CLAIMS WITHOUT IN-TEXT CORROBORATION (MANDATORY):',
+      '- If a claim is extraordinary/improbable and either (a) lacks attribution, or (b) has only single-source attribution with NO corroboration elsewhere in TEXT, exclude it from rewrite.text entirely.',
       '- Hedging (e.g., “reportedly,” “allegedly”) does not override this rule; do not retain, paraphrase, or relocate the claim.',
-      '— Authority & Jurisdiction (TEXT‑only): treat a source as non‑authoritative if TEXT does not explicitly establish a role/title with decision‑making or official visibility over the affected location/topic. Off‑jurisdiction roles do not count as corroboration.',
-      '— Fictionality/Novelty heuristic (TEXT‑only): if TEXT provides no institutional affiliation or recognizable role and the name appears only once with playful or non‑institutional markers (e.g., nickname‑like tokens), treat as non‑authoritative.',
-      '— Corroboration test (TEXT‑only): corroboration requires a second, independent sentence in TEXT that restates the event’s core predicate/scale or provides verifiable logistics directly dependent on it. Mere reactions, opinions, or vague restatements do not count.',
+      '— Authority & Jurisdiction (TEXT-only): treat a source as non-authoritative if TEXT does not explicitly establish a role/title with decision-making or official visibility over the affected location/topic. Off-jurisdiction roles do not count as corroboration.',
+      '— Fictionality/Novelty heuristic (TEXT-only): if TEXT provides no institutional affiliation or recognizable role and the name appears only once with playful or non-institutional markers (e.g., nickname-like tokens), treat as non-authoritative.',
+      '— Corroboration test (TEXT-only): corroboration requires a second, independent sentence in TEXT that restates the event’s core predicate/scale or provides verifiable logistics directly dependent on it. Mere reactions, opinions, or vague restatements do not count.',
       '- Record excluded claims only in analysis.findings with high severity and a brief evidence_snippet.',
-    ],
+    ].join('\n'),
   },
 
   // Stage 3 — Internal Coherence Filter
@@ -276,6 +284,9 @@ const COMMON_ABBR = [
   'Gov.',
   'Sen.',
   'Rep.',
+  'Maj.',
+  'Col.',
+  'Gen.',
   // Name suffixes
   'Jr.',
   'Sr.',
@@ -313,14 +324,19 @@ function splitIntoSentences(text) {
     const re = new RegExp('\\b' + escapeRegExp(abbr), 'g');
     tmp = tmp.replace(re, abbr.replace(/\./g, SENTINEL));
   }
-  const parts = tmp.split(/(?<=[.!?])\s+/);
+  // Normalize punctuation noise
+  tmp = tmp.replace(/\u2026/g, '...').replace(/\s+—\s+/g, ' — ');
+  // Split on end punctuation possibly followed by quotes/brackets
+  // e.g., '... said." Next' or '... said.) Next'
+  const parts = tmp.split(/(?<=[.!?]["')\]\}]*)(?:\s+|\n+)/);
   return parts
     .map((p) => p.replace(new RegExp(SENTINEL, 'g'), '.').trim())
     .filter(Boolean);
 }
 
 function hasFiniteVerb(s) {
-  return /\b(will|is|are|was|were|opens?|open|plans?|aims?|uses?|announced|said|stated)\b/i.test(
+  // Expanded finite-verb heuristics
+  return /\b(will|is|are|was|were|opens?|open|launch(?:es|ed)?|orders?|approv(?:e|es|ed)|votes?|plans?|aims?|uses?|deploys?|announced|said|stated|confirmed|reported)\b/i.test(
     s || ''
   );
 }
@@ -368,6 +384,11 @@ function collectFlaggedTerms(sus) {
   return terms;
 }
 
+function makeTermRegex(term) {
+  const safe = escapeRegExp(term.trim());
+  return new RegExp(`\\b${safe.replace(/\\s+/g, '[\\s-]+')}\\b`, 'i');
+}
+
 const llm = new ChatOpenAI({
   model: DEFAULT_MODEL,
   temperature: DEFAULT_TEMPERATURE,
@@ -404,9 +425,24 @@ export const rulesetPipeline = RunnableSequence.from([
       },
     ];
 
-    const res = await llm.invoke(messages, {
+    // --- Run rewrite (always) and SUS (stage ≥6) in parallel for latency ---
+    const rewritePromise = llm.invoke(messages, {
       response_format: { type: 'json_object' },
     });
+
+    let susPromise = null;
+    if (STAGE >= 6) {
+      const susPrompt = makeSusAgentPrompt();
+      const susMessages = [
+        { role: 'system', content: susPrompt },
+        { role: 'user', content: JSON.stringify({ TEXT }, null, 2) },
+      ];
+      susPromise = llm.invoke(susMessages, {
+        response_format: { type: 'json_object' },
+      });
+    }
+
+    const res = await rewritePromise;
 
     let parsed;
     try {
@@ -418,31 +454,31 @@ export const rulesetPipeline = RunnableSequence.from([
 
     if (!parsed || typeof parsed !== 'object') {
       parsed = {
-        version: 'mcp-demo/0.3',
+        version: 'mcp-demo/0.4',
         analysis: {
           findings: [],
           tone: { polarity: 'neutral', confidence: 0.5 },
         },
         rewrite: {
-          text: TEXT,
-          rationale: ['fallback: invalid JSON from model'],
+          text: '',
+          rationale: ['fallback: invalid JSON from model — blocked output'],
           ops: [],
         },
+      };
+      parsed.human_review_recommended = {
+        flag: true,
+        severity: 'high',
+        reason: 'Invalid JSON from rewrite agent',
+        details: ['Output suppressed to avoid bypassing safety stages.'],
+        recommendation: 'Retry generation or route to human review.',
       };
     }
 
     // Stage 6: run SUS agent (advisory) using world knowledge with no invention.
     let sus = null;
     if (STAGE >= 6) {
-      const susPrompt = makeSusAgentPrompt();
-      const susMessages = [
-        { role: 'system', content: susPrompt },
-        { role: 'user', content: JSON.stringify({ TEXT }, null, 2) },
-      ];
       try {
-        const susRes = await llm.invoke(susMessages, {
-          response_format: { type: 'json_object' },
-        });
+        const susRes = await susPromise;
         sus =
           typeof susRes.content === 'string'
             ? JSON.parse(susRes.content)
@@ -466,24 +502,22 @@ export const rulesetPipeline = RunnableSequence.from([
     }
 
     // Stage 7: apply SUS gate to rewrite.text
-    // Keep this logic intentionally simple: if SUS flags medium/high terms, drop sentences containing those terms.
+    // Logic kept intentionally simple: if SUS flags medium/high terms, drop those sentences.
     if (STAGE >= 7 && sus) {
-      // Collect terms from flags (medium/high) and optional block_terms
       const flaggedTerms = collectFlaggedTerms(sus);
       if (flaggedTerms.size) {
         const original = parsed?.rewrite?.text ?? TEXT ?? '';
         const sentences = splitIntoSentences(original);
-        const patterns = Array.from(flaggedTerms).map((t) => {
-          const safe = escapeRegExp(t);
-          return new RegExp(`\\b${safe}\\b`, 'i');
-        });
+        const patterns = Array.from(flaggedTerms).map(makeTermRegex);
         const kept = [];
         const removed = [];
         for (const s of sentences) {
           const hit = patterns.some((re) => re.test(s));
           if (hit) {
             removed.push(s);
-            // --- Try to keep the substantive clause without the flagged subject ---
+\            if (!SUS_SALVAGE) {
+              continue;
+            }
             let redacted = s;
             for (const re of patterns) {
               redacted = redacted
@@ -491,13 +525,11 @@ export const rulesetPipeline = RunnableSequence.from([
                 .replace(/\s{2,}/g, ' ')
                 .trim();
             }
-            // 2) If sentence contains a complement "that ..." and the flagged term likely preceded it, salvage the clause after "that".
             let salvage = redacted;
             const idxThat = salvage.toLowerCase().indexOf(' that ');
             if (idxThat > -1) {
               salvage = salvage.slice(idxThat + 6).trim();
             }
-            // 3) Remove leading reporting verbs if left dangling (e.g., "announced that")
             salvage = salvage
               .replace(
                 /^(announced|said|stated|noted|added|reported|confirmed|revealed)\s+that\s+/i,
@@ -509,7 +541,6 @@ export const rulesetPipeline = RunnableSequence.from([
               )
               .trim();
 
-            // 4) Check if we've lost the subject entirely
             const startsWithModal =
               /^(will|would|shall|should|may|might|can|could|must|has|have|had|is|are|was|were)\b/i.test(
                 salvage
@@ -521,14 +552,11 @@ export const rulesetPipeline = RunnableSequence.from([
               );
 
             if (lacksSubject) {
-              // Instead of trying to salvage a broken sentence, just drop it entirely
-
               continue;
             }
 
-            // 5) Must contain a finite verb and at least 5 words
             const hasVerb =
-              /\b(will|is|are|was|were|opens?|open|plans?|aims?|uses?)\b/i.test(
+              /\b(will|is|are|was|were|opens?|open|launch(?:es|ed)?|orders?|approv(?:e|es|ed)|votes?|plans?|aims?|uses?|deploys?)\b/i.test(
                 salvage
               );
             const wordCount = salvage.split(/\s+/).filter(Boolean).length;
@@ -551,7 +579,11 @@ export const rulesetPipeline = RunnableSequence.from([
             after: filtered,
           });
           parsed.rewrite.rationale.push(
-            `Stage 7 SUS gate: removed ${removed.length} sentence(s) containing SUS-flagged terms.`
+            `Stage 7 SUS gate: removed ${
+              removed.length
+            } sentence(s) containing SUS-flagged terms${
+              SUS_SALVAGE ? ' (with salvage enabled).' : '.'
+            }`
           );
           parsed.analysis.findings.push({
             rule_id: 'sus-gate',
@@ -625,6 +657,7 @@ export const rulesetPipeline = RunnableSequence.from([
       stage: STAGE,
       stage_titles: CHUNKS.slice(0, STAGE + 1).map((c) => c.title),
       model: DEFAULT_MODEL,
+      sus_salvage: SUS_SALVAGE,
     };
     if (sus) parsed._workshop.sus = sus;
 
