@@ -31,9 +31,7 @@ function resolveRulesetPath() {
   if (ENV_RULESET_PATH && fs.existsSync(ENV_RULESET_PATH))
     return ENV_RULESET_PATH;
 
-  const candidates = [
-    path.resolve(process.cwd(), 'data/ruleset.json'),
-  ];
+  const candidates = [path.resolve(process.cwd(), 'data/ruleset.json')];
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
   }
@@ -43,12 +41,17 @@ function resolveRulesetPath() {
 }
 
 function loadRulesetFromFile() {
-  const rulesetPath = resolveRulesetPath();
-  const raw = loadTextFileMaybe(rulesetPath);
-  if (!raw) throw new Error(`Failed to read ruleset at: ${rulesetPath}`);
-  const json = JSON.parse(raw);
-  const sha = stableHash(raw);
-  return { ruleset: json, sha, path: rulesetPath };
+  try {
+    const rulesetPath = resolveRulesetPath();
+    const raw = loadTextFileMaybe(rulesetPath);
+    if (!raw) throw new Error(`Failed to read ruleset at: ${rulesetPath}`);
+    const json = JSON.parse(raw);
+    const sha = stableHash(raw);
+    return { ruleset: json, sha, path: rulesetPath };
+  } catch (e) {
+    // Fallback to an empty ruleset if none is provided
+    return { ruleset: [], sha: 'empty', path: '(none)' };
+  }
 }
 
 function coerceStage(inputStage) {
@@ -442,7 +445,30 @@ export const rulesetPipeline = RunnableSequence.from([
       });
     }
 
-    const res = await rewritePromise;
+    let res;
+    try {
+      res = await rewritePromise;
+    } catch (e) {
+      // LLM call failed; produce a safe placeholder result
+      res = {
+        content: JSON.stringify(
+          {
+            version: 'mcp-demo/0.4',
+            analysis: {
+              findings: [],
+              tone: { polarity: 'neutral', confidence: 0.5 },
+            },
+            rewrite: {
+              text: '',
+              rationale: ['fallback: llm error — blocked output'],
+              ops: [],
+            },
+          },
+          null,
+          2
+        ),
+      };
+    }
 
     let parsed;
     try {
@@ -515,7 +541,7 @@ export const rulesetPipeline = RunnableSequence.from([
           const hit = patterns.some((re) => re.test(s));
           if (hit) {
             removed.push(s);
-\            if (!SUS_SALVAGE) {
+            if (!SUS_SALVAGE) {
               continue;
             }
             let redacted = s;

@@ -3,6 +3,8 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import path from 'node:path';
 import fs from 'node:fs';
 
+const FACTCHECK_MODE = process.env.FACTCHECK_MODE || 'off';
+
 let clients = { strapi: null, wp: null, factcheck: null };
 let initPromise = null;
 
@@ -95,46 +97,50 @@ export async function getClients() {
       );
     }
 
-    // Fact Check Tools MCP (stdio)
-    try {
-      const factScript = path.resolve(cwd, 'src/mcp/factcheck-server.mjs');
-      if (!fs.existsSync(factScript)) {
-        throw new Error('FactCheck MCP script not found at: ' + factScript);
-      }
-      const fcEnv = {};
-      if (process.env.GOOGLE_FACT_CHECK_TOOLS_KEY)
-        fcEnv.GOOGLE_FACT_CHECK_TOOLS_KEY =
-          process.env.GOOGLE_FACT_CHECK_TOOLS_KEY;
-      if (process.env.FACTCHECKTOOLS_API_KEY)
-        fcEnv.FACTCHECKTOOLS_API_KEY = process.env.FACTCHECKTOOLS_API_KEY;
-      if (process.env.FACT_CHECK_API_KEY)
-        fcEnv.FACT_CHECK_API_KEY = process.env.FACT_CHECK_API_KEY;
+    // Fact Check Tools MCP (stdio) — only if enabled
+    if (FACTCHECK_MODE !== 'off') {
+      try {
+        const factScript = path.resolve(cwd, 'src/mcp/factcheck-server.mjs');
+        if (!fs.existsSync(factScript)) {
+          throw new Error('FactCheck MCP script not found at: ' + factScript);
+        }
+        const fcEnv = {};
+        if (process.env.GOOGLE_FACT_CHECK_TOOLS_KEY)
+          fcEnv.GOOGLE_FACT_CHECK_TOOLS_KEY =
+            process.env.GOOGLE_FACT_CHECK_TOOLS_KEY;
+        if (process.env.FACTCHECKTOOLS_API_KEY)
+          fcEnv.FACTCHECKTOOLS_API_KEY = process.env.FACTCHECKTOOLS_API_KEY;
+        if (process.env.FACT_CHECK_API_KEY)
+          fcEnv.FACT_CHECK_API_KEY = process.env.FACT_CHECK_API_KEY;
 
-      console.log(
-        '[Next] Spawning FactCheck MCP (node):',
-        factScript,
-        'env:',
-        Object.keys(fcEnv)
-      );
-      const factTransport = new StdioClientTransport({
-        command: 'node',
-        args: [factScript],
-        env: fcEnv,
-        stderr: 'inherit',
-        cwd,
-      });
-      const fcClient = new Client(
-        { name: 'next-demo', version: '1.0.0' },
-        { capabilities: {} }
-      );
-      await fcClient.connect(factTransport);
-      clients.factcheck = fcClient;
-      console.log('[Next] MCP (FactCheck) connected');
-    } catch (e) {
-      console.warn(
-        '[Next] FactCheck MCP connect failed:',
-        e?.stack || e?.message || e
-      );
+        console.log(
+          '[Next] Spawning FactCheck MCP (node):',
+          factScript,
+          'env:',
+          Object.keys(fcEnv)
+        );
+        const factTransport = new StdioClientTransport({
+          command: 'node',
+          args: [factScript],
+          env: fcEnv,
+          stderr: 'inherit',
+          cwd,
+        });
+        const fcClient = new Client(
+          { name: 'next-demo', version: '1.0.0' },
+          { capabilities: {} }
+        );
+        await fcClient.connect(factTransport);
+        clients.factcheck = fcClient;
+        console.log('[Next] MCP (FactCheck) connected');
+      } catch (e) {
+        console.warn(
+          '[Next] FactCheck MCP connect failed:',
+          e?.stack || e?.message || e
+        );
+      }
+    } else {
+      console.log('[Next] FactCheck MCP disabled (FACTCHECK_MODE=off)');
     }
 
     return clients;
